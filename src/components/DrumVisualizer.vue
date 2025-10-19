@@ -45,6 +45,7 @@
 </template>
 
 <script setup>
+/* ======================= Получение SVG для пэда ======================= */
 import DrumRoll from './DrumRoll.vue'
 function getPadSvg(pad) {
   // 1) точное имя без путей
@@ -79,41 +80,81 @@ function getPadSvg(pad) {
   return fallbackSvg;
 }
 
+// Семплы из /public/samples — все пути начинаются с /samples/...
+const SAMPLES = {
+  kick: '/samples/Kick-V12-Yamaha-16x16.wav',
 
-function getSvgForPad(pad) {
-  // 1) точное имя
-  const exact = svgs.value[pad.file]
-  if (exact) return exact
+  // пока нет отдельных томов — временно используем rimshot (заменишь на свои томы)
+  snare: '/samples/RIMSHOTS-V08-CW-6x13.wav',
+  tom1:  '/samples/RIMSHOTS-V08-CW-6x13.wav',
+  tom2:  '/samples/RIMSHOTS-V08-CW-6x13.wav',
+  tom3:  '/samples/RIMSHOTS-V08-CW-6x13.wav',
 
-  // 2) попытка подобрать по ключевым словам
-  const keys = Object.keys(svgs.value).map(k => k.toLowerCase())
-  const by = (substr) => {
-    const i = keys.findIndex(k => k.includes(substr))
-    return i >= 0 ? svgs.value[Object.keys(svgs.value)[i]] : null
-  }
+  // hi-hat варианты
+  hh_closed: '/samples/HHats-CL-V10-SABIAN-AAX.wav',
+  hh_open:   '/samples/HHats-OP-V08-SABIAN-AAX.wav',
+  hh_pedal:  '/samples/HHats-PDL-V05-SABIAN-AAX.wav',
 
-  if (pad.id === 'crash2') {
-    return by('тарелка2') || by('crash2') || by('right') || by('ride') || by('тарелка') || svgs.value['тарелка1.svg'] || fallbackSvg
-  }
-  if (pad.id === 'crash1') {
-    return by('тарелка1') || by('crash1') || by('left')  || by('тарелка') || fallbackSvg
-  }
+  // крушки
+  crash14:   '/samples/14-Crash-V06-SABIAN-14.wav',
+  crash18:   '/samples/18-Crash-V05-SABIAN-18.wav',
 
-  return fallbackSvg
+  // bell/ride bell
+  ride_bell: '/samples/BELL-V08-ROBMOR-SABIAN-22.wav',
 }
+
+// Ноты -> какой тип хэта/краша/бела
+const NOTE_MEANING = {
+  // HH
+  42: 'hh_closed', // Closed Hat
+  46: 'hh_open',   // Open Hat
+  44: 'hh_pedal',  // Pedal Hat
+  // Crash L/R (типовые GM/DTX/TD)
+  49: 'crash14',
+  57: 'crash18',
+  55: 'crash14', // splash/alt
+  // Ride bell иногда на 53/59 — дадим bell
+  53: 'ride_bell',
+  59: 'ride_bell',
+}
+
+// Возвращаем путь к семплу по padId и ноте (если есть)
+function sampleFor(padId, note) {
+  if (padId === 'hihat') {
+    // при клике мышью note нет — берём closed
+    const key = NOTE_MEANING[note] || 'hh_closed'
+    return SAMPLES[key]
+  }
+  if (padId === 'crash1') return SAMPLES.crash14
+  if (padId === 'crash2') {
+    const key = NOTE_MEANING[note] || 'crash18'
+    return SAMPLES[key]
+  }
+  if (padId === 'ride') return SAMPLES.ride_bell
+  // остальное — прямой мэппинг по id
+  return SAMPLES[padId]
+}
+
+async function hit(pad, vel = 1, note = null) {
+  flash(pad.id)
+  const url = sampleFor(pad.id, note)
+  if (url) await playSample(url, vel)
+}
+
+// (legacy getSvgForPad removed)
 /* ======================= Импорты / состояние ======================= */
 import { ref } from 'vue'
 
 /* ---------- Пэды (имена SVG — только ФАЙЛ из /src/svg) ---------- */
 const pads = ref([
-  { id: 'kick',   label: 'Бочка',    file: 'бочка.svg',    sample: '/samples/kick.wav' },
-  { id: 'snare',  label: 'Малый',    file: 'малый.svg',    sample: '/samples/snare.wav' },
-  { id: 'tom1',   label: 'Том 1',    file: 'том1_1.svg',   sample: '/samples/tom1.wav' },
-  { id: 'tom2',   label: 'Том 2',    file: 'том2_1.svg',   sample: '/samples/tom1.wav' },
-  { id: 'tom3',   label: 'Флор-том', file: 'том3.svg',     sample: '/samples/tom1.wav' },
-  { id: 'hihat',  label: 'Хай-хэт',  file: 'хайхет.svg',   sample: '/samples/hihat.wav' },
-  { id: 'crash1', label: 'Crash L',  file: 'тарелка1.svg', sample: '/samples/crash.wav' },
-  { id: 'crash2', label: 'Crash R',  file: 'тарелка1.svg',    sample: '/samples/crash.wav' } // <= проверь, что plate.svg есть в src/svg
+  { id: 'kick',   label: 'Бочка',    file: 'бочка.svg' },
+  { id: 'snare',  label: 'Малый',    file: 'малый.svg' },
+  { id: 'tom1',   label: 'Том 1',    file: 'том1_1.svg' },
+  { id: 'tom2',   label: 'Том 2',    file: 'том2_1.svg' },
+  { id: 'tom3',   label: 'Флор-том', file: 'том3.svg' },
+  { id: 'hihat',  label: 'Хай-хэт',  file: 'хайхет.svg' },
+  { id: 'crash1', label: 'Crash L',  file: 'тарелка1.svg' },
+  { id: 'crash2', label: 'Crash R',  file: 'plate.svg' }
 ])
 
 /* ======================= SVG как raw (Vite 5) ======================= */
@@ -170,10 +211,7 @@ async function playSample(url, vel = 1) {
   src.connect(gain).connect(c.destination)
   src.start()
 }
-async function hit(pad, vel = 1) {
-  flash(pad.id)
-  await playSample(pad.sample, vel)
-}
+// (duplicate/old hit function removed)
 
 /* ======================= Карты нот (Yamaha/Roland/Alesis/GM) ======================= */
 const maps = {
