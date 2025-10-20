@@ -35,7 +35,12 @@
         class="pad"
         @pointerdown="hit(pad)"
       >
-        <div class="svg-wrap" :class="{ active: isActive(pad.id) }" v-html="getPadSvg(pad)" />
+        <div
+        class="svg-wrap"
+        :class="{ active: isActive(pad.id) }"
+        :style="padStyle(pad.id)"
+        v-html="getPadSvg(pad)"
+        />w
 
         <div class="label">{{ pad.label }}</div>
       </div>
@@ -45,6 +50,8 @@
 </template>
 
 <script setup>
+
+
 /* ======================= Получение SVG для пэда ======================= */
 import DrumRoll from './DrumRoll.vue'
 function getPadSvg(pad) {
@@ -136,10 +143,11 @@ function sampleFor(padId, note) {
 }
 
 async function hit(pad, vel = 1, note = null) {
-  flash(pad.id)
+  flash(pad.id, vel)                
   const url = sampleFor(pad.id, note)
   if (url) await playSample(url, vel)
 }
+
 
 // (legacy getSvgForPad removed)
 /* ======================= Импорты / состояние ======================= */
@@ -175,18 +183,30 @@ for (const [path, raw] of Object.entries(svgModules)) {
     .replace(/stroke="[^"]*"/g, 'stroke="currentColor"')
 }
 
-/* ======================= Подсветка 1 сек ======================= */
+
+/* ======================= Подсветка c учётом velocity ======================= */
 const ACTIVE_MS = 1000
-const activeIds = ref(new Set())
-function isActive(id) { return activeIds.value.has(id) }
-function flash(id) {
-  activeIds.value.add(id)
-  activeIds.value = new Set(activeIds.value)
+const activeMap = ref(new Map()) // id -> vel(0..1)
+
+function isActive(id) {
+  return activeMap.value.has(id)
+}
+function padStyle(id) {
+  const v = activeMap.value.get(id) ?? 0
+  return { '--hit': v } // прокинем в CSS-переменную
+}
+function flash(id, vel = 1) {
+  // ограничим на всякий случай 0..1
+  const v = Math.max(0, Math.min(1, vel))
+  activeMap.value.set(id, v)
+  // чтобы Vue отреагировал на изменения Map
+  activeMap.value = new Map(activeMap.value)
   setTimeout(() => {
-    activeIds.value.delete(id)
-    activeIds.value = new Set(activeIds.value)
+    activeMap.value.delete(id)
+    activeMap.value = new Map(activeMap.value)
   }, ACTIVE_MS)
 }
+
 
 /* ======================= Звук (кэш + velocity) ======================= */
 let ctx
@@ -440,8 +460,34 @@ console.log('[SVG files]', Object.keys(svgs.value))
 .pad:hover{ transform:scale(1.05); }
 .label{ font-size:12px; margin-top:4px; color:#333; }
 
-.svg-wrap{ color:#222; width:88px; height:88px; transition:color .12s, transform .1s; }
-.svg-wrap.active{ color:#ef4444; transform:scale(1.1); }
+.svg-wrap {
+  --hit: 0; /* сила удара (0–1) */
+  color: #222;
+  width: 88px;
+  height: 88px;
+  transition:
+    color 0.15s ease,
+    transform 0.15s ease,
+    filter 0.15s ease;
+}
+
+/* Активный пэд: реакция на силу удара */
+.svg-wrap.active {
+  /* Чистый красный, но более мягкий */
+  color: hsl(0 70% calc(38% + var(--hit) * 8%));
+
+  /* Лёгкое дыхание при ударе */
+  transform: scale(calc(1 + var(--hit) * 0.04));
+
+  /* Менее ярное подсвечивание (уменьшили alpha) */
+  filter: drop-shadow(0 0 calc(var(--hit) * 2.5px) rgba(255, 50, 50, 0.25));
+}
+
+
+
+
+
 .svg-wrap :deep(svg){ width:100%; height:100%; display:block; }
 .svg-wrap :deep(svg *){ fill:currentColor !important; stroke:currentColor !important; }
+
 </style>
