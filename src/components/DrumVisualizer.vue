@@ -6,12 +6,10 @@
         {{ midiConnectionState==='connected' ? '✅ MIDI Connected' : '🎛️ Connect MIDI' }}
       </button>
 
-      <!-- список входов (все открыты и подписаны через updateMidiInputs) -->
       <select v-if="midiInputs.length" v-model="selectedInputId" @change="rebindSelectedInput">
         <option v-for="i in midiInputs" :key="i.id" :value="i.id">{{ i.name }}</option>
       </select>
 
-      <!-- выбор карты нот под модуль -->
       <select v-model="currentMapName" @change="rebuildNoteMap">
         <option value="yamaha_dtx">Yamaha DTX</option>
         <option value="roland_td">Roland TD</option>
@@ -22,12 +20,11 @@
       <span v-if="connectionError" class="midi-error">{{ connectionError }}</span>
     </div>
 
-    <!-- Отладка MIDI: показывает последние байты -->
     <div class="debug" v-if="isMidiMonitorEnabled && debug.count">
       MIDI events: {{ debug.count }} · {{ debug.last }}
     </div>
 
-    <!-- Пэды в один ряд -->
+    <!-- Пэды -->
     <div class="kit">
       <div
         v-for="pad in pads"
@@ -36,124 +33,100 @@
         @pointerdown="hit(pad)"
       >
         <div
-        class="svg-wrap"
-        :class="{ active: isActive(pad.id) }"
-        :style="padStyle(pad.id)"
-        v-html="getPadSvg(pad)"
-        />w
-
+          class="svg-wrap"
+          :class="{ active: isActive(pad.id) }"
+          :style="padStyle(pad.id)"
+          v-html="getPadSvg(pad)"
+        ></div>
         <div class="label">{{ pad.label }}</div>
       </div>
     </div>
+
     <DrumRoll :pads="pads" @hit="({pad, velocity}) => hit(pad, velocity)" />
   </div>
 </template>
 
 <script setup>
-
-
-/* ======================= Получение SVG для пэда ======================= */
+import { ref } from 'vue'
 import DrumRoll from './DrumRoll.vue'
-function getPadSvg(pad) {
-  // 1) точное имя без путей
-  const raw = (pad.file || '').split(/[\\/]/).pop(); // убираем пути и обратные слэши
-  if (svgs.value[raw]) return svgs.value[raw];
 
-  // 2) умный поиск по ключевым словам
-  const keys = Object.keys(svgs.value);
-  const lower = keys.map(k => k.toLowerCase());
+/* ======================= SVG для пэдов ======================= */
+function getPadSvg(pad) {
+  const raw = (pad.file || '').split(/[\\/]/).pop()
+  if (svgs.value[raw]) return svgs.value[raw]
+
+  const keys = Object.keys(svgs.value)
+  const lower = keys.map(k => k.toLowerCase())
 
   if (pad.id === 'crash2') {
-    // ищем “вторую” тарелку: цифра 2 / right / ride
-    let i = lower.findIndex(k => (k.includes('тарелка') || k.includes('crash') || k.includes('ride')) && /(^|[^0-9])2([^0-9]|$)/.test(k));
-    if (i === -1) i = lower.findIndex(k => k.includes('тарелка') && k.includes('right'));
-    if (i === -1) i = lower.findIndex(k => k.includes('crash') && /\br(ight)?\b/.test(k));
-    if (i !== -1) return svgs.value[keys[i]];
+    let i = lower.findIndex(k => (k.includes('тарелка') || k.includes('crash') || k.includes('ride')) && /(^|[^0-9])2([^0-9]|$)/.test(k))
+    if (i === -1) i = lower.findIndex(k => k.includes('тарелка') && k.includes('right'))
+    if (i === -1) i = lower.findIndex(k => k.includes('crash') && /\br(ight)?\b/.test(k))
+    if (i !== -1) return svgs.value[keys[i]]
   }
-
   if (pad.id === 'crash1') {
-    // левая: 1 / left / l
-    let i = lower.findIndex(k => (k.includes('тарелка') || k.includes('crash')) && /(^|[^0-9])1([^0-9]|$)/.test(k));
-    if (i === -1) i = lower.findIndex(k => k.includes('тарелка') && k.includes('left'));
-    if (i === -1) i = lower.findIndex(k => k.includes('crash') && /\bl(eft)?\b/.test(k));
-    if (i !== -1) return svgs.value[keys[i]];
+    let i = lower.findIndex(k => (k.includes('тарелка') || k.includes('crash')) && /(^|[^0-9])1([^0-9]|$)/.test(k))
+    if (i === -1) i = lower.findIndex(k => k.includes('тарелка') && k.includes('left'))
+    if (i === -1) i = lower.findIndex(k => k.includes('crash') && /\bl(eft)?\b/.test(k))
+    if (i !== -1) return svgs.value[keys[i]]
   }
-
-  // 3) любой файл, где встречается “тарелка”/“crash”/“ride”
-  const any = lower.findIndex(k => k.includes('тарелка') || k.includes('crash') || k.includes('ride'));
-  if (any !== -1) return svgs.value[keys[any]];
-
-  // 4) запасной круг
-  return fallbackSvg;
+  const any = lower.findIndex(k => k.includes('тарелка') || k.includes('crash') || k.includes('ride'))
+  if (any !== -1) return svgs.value[keys[any]]
+  return fallbackSvg
 }
 
-// Семплы из /public/samples — все пути начинаются с /samples/...
-const SAMPLES = {
-  kick: '/samples/Kick-V12-Yamaha-16x16.wav',
-
-  // пока нет отдельных томов — временно используем rimshot (заменишь на свои томы)
-  snare: '/samples/RIMSHOTS-V08-CW-6x13.wav',
-  tom1:  '/samples/RIMSHOTS-V08-CW-6x13.wav',
-  tom2:  '/samples/RIMSHOTS-V08-CW-6x13.wav',
-  tom3:  '/samples/RIMSHOTS-V08-CW-6x13.wav',
-
-  // hi-hat варианты
-  hh_closed: '/samples/HHats-CL-V10-SABIAN-AAX.wav',
-  hh_open:   '/samples/HHats-OP-V08-SABIAN-AAX.wav',
-  hh_pedal:  '/samples/HHats-PDL-V05-SABIAN-AAX.wav',
-
-  // крушки
-  crash14:   '/samples/14-Crash-V06-SABIAN-14.wav',
-  crash18:   '/samples/18-Crash-V05-SABIAN-18.wav',
-
-  // bell/ride bell
-  ride_bell: '/samples/BELL-V08-ROBMOR-SABIAN-22.wav',
+/* ======================= Round-robin helper ======================= */
+const rrIndex = new Map()
+function rr(prefix, key, total) {
+  const i = (rrIndex.get(key) ?? 0) % total
+  rrIndex.set(key, i + 1)
+  return `${prefix}/v${i + 1}.wav`
 }
 
-// Ноты -> какой тип хэта/краша/бела
-const NOTE_MEANING = {
-  // HH
-  42: 'hh_closed', // Closed Hat
-  46: 'hh_open',   // Open Hat
-  44: 'hh_pedal',  // Pedal Hat
-  // Crash L/R (типовые GM/DTX/TD)
-  49: 'crash14',
-  57: 'crash18',
-  55: 'crash14', // splash/alt
-  // Ride bell иногда на 53/59 — дадим bell
-  53: 'ride_bell',
-  59: 'ride_bell',
+/* Кол-во семплов в папках /public/samples/... */
+const RR_COUNTS = {
+  kick: 6,
+  hihat_closed: 6,
+  hihat_open: 3,
+  crash: 7,
+  tom: 3,
+  rimshot: 6,
+  snare_center: 6,
+  snare_off: 6,
+  stick: 6,
 }
 
-// Возвращаем путь к семплу по padId и ноте (если есть)
+/* Возвращаем путь к семплу по пэду и (если есть) ноте */
 function sampleFor(padId, note) {
+  // Kick
+  if (padId === 'kick') return rr('/samples/kick', 'kick', RR_COUNTS.kick)
+
+  // Snare
+  if (padId === 'snare') return rr('/samples/snare_center', 'snare_center', RR_COUNTS.snare_center)
+
+  // Toms
+  if (padId === 'tom1' || padId === 'tom2' || padId === 'tom3') {
+    return rr('/samples/tom', padId, RR_COUNTS.tom) // независимый rr по каждому тому
+  }
+
+  // Hi-hat (42=closed, 46=open, 44=pedal -> closed если нет педального)
   if (padId === 'hihat') {
-    // при клике мышью note нет — берём closed
-    const key = NOTE_MEANING[note] || 'hh_closed'
-    return SAMPLES[key]
+    if (note === 46) return rr('/samples/hihat_open', 'hihat_open', RR_COUNTS.hihat_open)
+    return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
   }
-  if (padId === 'crash1') return SAMPLES.crash14
-  if (padId === 'crash2') {
-    const key = NOTE_MEANING[note] || 'crash18'
-    return SAMPLES[key]
+
+  // Crashes
+  if (padId === 'crash1' || padId === 'crash2') {
+    return rr('/samples/crash', 'crash', RR_COUNTS.crash)
   }
-  if (padId === 'ride') return SAMPLES.ride_bell
-  // остальное — прямой мэппинг по id
-  return SAMPLES[padId]
+
+  // Ride (заглушка)
+  if (padId === 'ride') return rr('/samples/stick', 'stick', RR_COUNTS.stick)
+
+  return rr('/samples/stick', 'stick', RR_COUNTS.stick)
 }
 
-async function hit(pad, vel = 1, note = null) {
-  flash(pad.id, vel)                
-  const url = sampleFor(pad.id, note)
-  if (url) await playSample(url, vel)
-}
-
-
-// (legacy getSvgForPad removed)
-/* ======================= Импорты / состояние ======================= */
-import { ref } from 'vue'
-
-/* ---------- Пэды (имена SVG — только ФАЙЛ из /src/svg) ---------- */
+/* ======================= Пэды ======================= */
 const pads = ref([
   { id: 'kick',   label: 'Бочка',    file: 'бочка.svg' },
   { id: 'snare',  label: 'Малый',    file: 'малый.svg' },
@@ -162,44 +135,52 @@ const pads = ref([
   { id: 'tom3',   label: 'Флор-том', file: 'том3.svg' },
   { id: 'hihat',  label: 'Хай-хэт',  file: 'хайхет.svg' },
   { id: 'crash1', label: 'Crash L',  file: 'тарелка1.svg' },
-  { id: 'crash2', label: 'Crash R',  file: 'plate.svg' }
+  { id: 'crash2', label: 'Crash R',  file: 'тарелка2.svg' },
 ])
 
-/* ======================= SVG как raw (Vite 5) ======================= */
+/* ======================= SVG raw (Vite 5) ======================= */
 const svgs = ref({})
 const fallbackSvg =
   '<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="48" stroke="currentColor" fill="none" stroke-width="4"/></svg>'
 
-const svgModules = import.meta.glob('../svg/*.svg', {
-  query: '?raw',
-  import: 'default',
-  eager: true
-})
-for (const [path, raw] of Object.entries(svgModules)) {
-  const file = path.split('/').pop()
-  const content = (typeof raw === 'string' ? raw : (raw && raw.default)) || ''
-  svgs.value[file] = content
-    .replace(/fill="(?!none)[^"]*"/g, 'fill="currentColor"')
-    .replace(/stroke="[^"]*"/g, 'stroke="currentColor"')
+function normalizeSvg(content) {
+  return content
+    .replace(/^\uFEFF/, '')                // BOM
+    .replace(/<\?xml[\s\S]*?\?>/i, '')     // XML пролог
+    .replace(/<!DOCTYPE[\s\S]*?>/i, '')    // DOCTYPE
+    .replace(/^\s+/, '')                   // лидирующие пробелы
+    .replace(/<svg\b([^>]*?)>/i, (m, attrs) => {
+      // гарантируем xmlns
+      if (!/xmlns=/.test(m)) return `<svg ${attrs} xmlns="http://www.w3.org/2000/svg">`
+      return m
+    })
+    .replace(/<svg\b([^>]*?)>/i, (m, attrs) => {
+      if (/viewBox=/i.test(m)) return m
+      const w = (/width="(\d+(?:\.\d+)?)"/i.exec(m) || [,'1024'])[1]
+      const h = (/height="(\d+(?:\.\d+)?)"/i.exec(m) || [,'1024'])[1]
+      return `<svg ${attrs} viewBox="0 0 ${w} ${h}">`
+    })
+    .replace(/fill="(?!none)[^"]*"/gi, 'fill="currentColor"')
+    .replace(/stroke="[^"]*"/gi, 'stroke="currentColor"')
 }
 
+// 1) Глобом грузим svg
+const svgModules = import.meta.glob('../svg/*.svg', { query: '?raw', import: 'default', eager: true })
+for (const [path, raw] of Object.entries(svgModules)) {
+  const file = path.split('/').pop()
+  const txt = (typeof raw === 'string' ? raw : raw?.default) || ''
+  svgs.value[file] = normalizeSvg(txt)
+}
 
-/* ======================= Подсветка c учётом velocity ======================= */
+/* ======================= Подсветка (velocity) ======================= */
 const ACTIVE_MS = 1000
 const activeMap = ref(new Map()) // id -> vel(0..1)
 
-function isActive(id) {
-  return activeMap.value.has(id)
-}
-function padStyle(id) {
-  const v = activeMap.value.get(id) ?? 0
-  return { '--hit': v } // прокинем в CSS-переменную
-}
+function isActive(id) { return activeMap.value.has(id) }
+function padStyle(id) { return { '--hit': activeMap.value.get(id) ?? 0 } }
 function flash(id, vel = 1) {
-  // ограничим на всякий случай 0..1
   const v = Math.max(0, Math.min(1, vel))
   activeMap.value.set(id, v)
-  // чтобы Vue отреагировал на изменения Map
   activeMap.value = new Map(activeMap.value)
   setTimeout(() => {
     activeMap.value.delete(id)
@@ -207,8 +188,7 @@ function flash(id, vel = 1) {
   }, ACTIVE_MS)
 }
 
-
-/* ======================= Звук (кэш + velocity) ======================= */
+/* ======================= Аудио ======================= */
 let ctx
 const cache = new Map()
 async function getCtx() {
@@ -231,53 +211,32 @@ async function playSample(url, vel = 1) {
   src.connect(gain).connect(c.destination)
   src.start()
 }
-// (duplicate/old hit function removed)
+async function hit(pad, vel = 1, note = null) {
+  flash(pad.id, vel)
+  const url = sampleFor(pad.id, note)
+  if (url) await playSample(url, vel)
+}
 
-/* ======================= Карты нот (Yamaha/Roland/Alesis/GM) ======================= */
+/* ======================= Карты нот ======================= */
 const maps = {
-  gm: {                            // General MIDI Drums
-    kick:[36,35],
-    snare:[38,37,40],
-    tom1:[50,48],
-    tom2:[47,45],
-    tom3:[43,41],
-    hihat:[42,46,44,23,21],        // closed/open/pedal/foot splash
-    crash1:[49,55],                // crash/splash
-    crash2:[57,52,59],             // crash2/china/ride edge
-    ride:[51,53,59],
+  gm: {
+    kick:[36,35], snare:[38,37,40], tom1:[50,48], tom2:[47,45], tom3:[43,41],
+    hihat:[42,46,44,23,21],
+    crash1:[49,55], crash2:[57,52,59], ride:[51,53,59],
   },
-  yamaha_dtx: {                    // Yamaha DTX
-    kick:[36],
-    snare:[38,37,40],
-    tom1:[50],
-    tom2:[47,45],
-    tom3:[43,41],
+  yamaha_dtx: {
+    kick:[36], snare:[38,37,40], tom1:[50], tom2:[47,45], tom3:[43,41],
     hihat:[42,46,44,23],
-    crash1:[49,55],
-    crash2:[57,52,59],
-    ride:[51,53,59],
+    crash1:[49,55], crash2:[57,52,59], ride:[51,53,59],
   },
-  roland_td: {                     // Roland TD-series (типично)
-    kick:[36,35],
-    snare:[38,37,40],
-    tom1:[50],
-    tom2:[47,45],
-    tom3:[43,41],
+  roland_td: {
+    kick:[36,35], snare:[38,37,40], tom1:[50], tom2:[47,45], tom3:[43,41],
     hihat:[42,46,44,21,23],
-    crash1:[49,55],
-    crash2:[57,52],
-    ride:[51,53,59],
+    crash1:[49,55], crash2:[57,52], ride:[51,53,59],
   },
-  alesis: {                        // Alesis Nitro/Surge/…
-    kick:[36],
-    snare:[38,40],
-    tom1:[50],
-    tom2:[47,45],
-    tom3:[43],
-    hihat:[42,46,44],
-    crash1:[49],
-    crash2:[57],
-    ride:[51,53],
+  alesis: {
+    kick:[36], snare:[38,40], tom1:[50], tom2:[47,45], tom3:[43],
+    hihat:[42,46,44], crash1:[49], crash2:[57], ride:[51,53],
   },
 }
 const currentMapName = ref('yamaha_dtx')
@@ -292,34 +251,27 @@ function rebuildNoteMap() {
 }
 rebuildNoteMap()
 
-/* ======================= ADAPTER под «муз» API ======================= */
-/** состояние соединения (их модель) */
+/* ======================= WebMIDI ======================= */
 const midiInputs = ref([])
-const midiAccessRef = ref(null)      // access храню отдельно, но имя оставил близким к их коду
+const midiAccessRef = ref(null)
 const connectionError = ref(null)
 const MidiConnectionState = { IDLE:'idle', CONNECTED:'connected', ERROR:'error', CONNECTING:'connecting' }
 const midiConnectionState = ref(MidiConnectionState.IDLE)
 const selectedInputId = ref('')
 
-/** монитор входа (как у них) */
 const isMidiMonitorEnabled = ref(true)
 const incomingData = ref({ status:null, number:null, velocity:null })
 let monitorTimer = null
 function startMidiMonitorTimeout(){ clearTimeout(monitorTimer); monitorTimer = setTimeout(() => { isMidiMonitorEnabled.value = false }, 2000) }
 function stopMidiMonitorTimeout(){ clearTimeout(monitorTimer) }
 
-/** базовые статусы и проверки (совместимы с их helpers) */
 const MIDI_CHANNEL_COUNT = 16
-const BASE_MIDI_STATUS_BYTES = {
-  NOTE_OFF: 0x80,
-  NOTE_ON:  0x90,
-  CONTROL_CHANGE: 0xB0
-}
+const BASE_MIDI_STATUS_BYTES = { NOTE_OFF: 0x80, NOTE_ON: 0x90, CONTROL_CHANGE: 0xB0 }
 function checkStatusByte(statusByte, baseStatusByte) {
   return statusByte >= baseStatusByte && statusByte < baseStatusByte + MIDI_CHANNEL_COUNT
 }
-function checkAcceptedMidiMessage(status/*, number*/) {
-  if (status >= 0xF0) return false // sys/clock
+function checkAcceptedMidiMessage(status) {
+  if (status >= 0xF0) return false
   return (
     checkStatusByte(status, BASE_MIDI_STATUS_BYTES.NOTE_ON) ||
     checkStatusByte(status, BASE_MIDI_STATUS_BYTES.NOTE_OFF) ||
@@ -327,27 +279,18 @@ function checkAcceptedMidiMessage(status/*, number*/) {
   )
 }
 
-/** их updateMidiInputs: открываем все входы и вешаем midiMessageHandler */
 const updateMidiInputs = (access) => {
   const inputs = [...access.inputs.values()]
-  inputs.forEach((input) => {
-    input.open()
-    input.onmidimessage = midiMessageHandler
-  })
+  inputs.forEach((input) => { input.open(); input.onmidimessage = midiMessageHandler })
   midiInputs.value = inputs
-  // авто-выбор первого/DrumPort
   const prefer = inputs.find(i => /DrumPort|loopMIDI/i.test(i.name || ''))
   selectedInputId.value = (prefer?.id) || (inputs[0]?.id || '')
 }
-
-/** перенакинуть обработчик на другой выбранный вход (если нужно) */
 function rebindSelectedInput() {
   const inObj = midiInputs.value.find(i => i.id === selectedInputId.value)
-  midiInputs.value.forEach(i => { if (i.id !== inObj?.id) i.onmidimessage = midiMessageHandler }) // все и так подписаны
-  // ничего дополнительно делать не нужно: мы подписываем КАЖДЫЙ вход в updateMidiInputs
+  midiInputs.value.forEach(i => { if (i.id !== inObj?.id) i.onmidimessage = midiMessageHandler })
 }
 
-/** их connectMidiDevice — полностью совместимый вызов */
 async function connectMidiDevice() {
   if (!('requestMIDIAccess' in navigator)) {
     connectionError.value = 'Web MIDI работает в Chrome/Edge и на HTTPS/localhost'
@@ -365,7 +308,6 @@ async function connectMidiDevice() {
     midiAccessRef.value = access
     connectionError.value = null
     updateMidiInputs(access)
-
     access.onstatechange = (e) => {
       const a = e.currentTarget
       if (a && a.inputs.size === 0) {
@@ -376,54 +318,40 @@ async function connectMidiDevice() {
       }
       updateMidiInputs(a)
     }
-
     midiConnectionState.value = MidiConnectionState.CONNECTED
   } catch (e) {
     midiConnectionState.value = MidiConnectionState.ERROR
   }
 }
 
-/** их midiMessageHandler: вызывает нашу playNoteMidi */
 const debug = ref({ count: 0, last: '' })
 const midiMessageHandler = ({ data }) => {
   const [status, number, velocity] = data
-
-  // монитор
   if (isMidiMonitorEnabled.value) {
     stopMidiMonitorTimeout()
     incomingData.value = { status, number, velocity }
     startMidiMonitorTimeout()
   }
-
-  // отладочная строка
   const cmd = status & 0xf0
   const ch  = (status & 0x0f) + 1
   debug.value.count++
   debug.value.last = `${Array.from(data).map(b=>b.toString(16).padStart(2,'0')).join(' ')} | cmd=0x${cmd.toString(16)} ch=${ch} note=${number} vel=${velocity}`
-
-  if (!checkAcceptedMidiMessage(status, number)) return
+  if (!checkAcceptedMidiMessage(status)) return
   playNoteMidi(status, number, velocity)
 }
 
-/** их playNoteMidi: вместо piano.noteOn/Off — наш hit(pad, vel) */
 function playNoteMidi(status, number, velocity) {
-  // Note On?
   if (checkStatusByte(status, BASE_MIDI_STATUS_BYTES.NOTE_ON)) {
-    if (velocity === 0) return // NoteOn с vel=0 = NoteOff
+    if (velocity === 0) return
     const padId = noteToPad[number] || 'kick'
     const pad = pads.value.find(p => p.id === padId)
     if (!pad) return
     const v = Math.max(0.1, Math.min(1, velocity / 127))
-    hit(pad, v)
+    hit(pad, v, number)        // пробрасываем note (для HH open 46)
     return
   }
-  // Note Off — подсветка сама погаснет через ACTIVE_MS, ничего не делаем
   if (checkStatusByte(status, BASE_MIDI_STATUS_BYTES.NOTE_OFF)) return
-
-  // CC/педаль — не используем
 }
-console.log('[SVG files]', Object.keys(svgs.value))
-
 </script>
 
 <style scoped>
@@ -460,34 +388,17 @@ console.log('[SVG files]', Object.keys(svgs.value))
 .pad:hover{ transform:scale(1.05); }
 .label{ font-size:12px; margin-top:4px; color:#333; }
 
-.svg-wrap {
-  --hit: 0; /* сила удара (0–1) */
-  color: #222;
-  width: 88px;
-  height: 88px;
-  transition:
-    color 0.15s ease,
-    transform 0.15s ease,
-    filter 0.15s ease;
+.svg-wrap{
+  --hit: 0;
+  color:#222;
+  width:88px; height:88px;
+  transition: color .15s ease, transform .15s ease, filter .15s ease;
 }
-
-/* Активный пэд: реакция на силу удара */
-.svg-wrap.active {
-  /* Чистый красный, но более мягкий */
+.svg-wrap.active{
   color: hsl(0 70% calc(38% + var(--hit) * 8%));
-
-  /* Лёгкое дыхание при ударе */
   transform: scale(calc(1 + var(--hit) * 0.04));
-
-  /* Менее ярное подсвечивание (уменьшили alpha) */
   filter: drop-shadow(0 0 calc(var(--hit) * 2.5px) rgba(255, 50, 50, 0.25));
 }
-
-
-
-
-
 .svg-wrap :deep(svg){ width:100%; height:100%; display:block; }
 .svg-wrap :deep(svg *){ fill:currentColor !important; stroke:currentColor !important; }
-
 </style>
