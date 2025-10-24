@@ -48,13 +48,13 @@
       </div>
     </div>
 
-    <DrumRoll :pads="pads" @hit="({pad, velocity}) => hit(pad, velocity)" />
+    
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import DrumRoll from './DrumRoll.vue'
+
 
 /* ======================= SVG для пэдов ======================= */
 function getPadSvg(pad) {
