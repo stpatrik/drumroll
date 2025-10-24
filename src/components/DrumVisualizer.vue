@@ -146,36 +146,25 @@ function sampleFor(padId, note) {
   }
 
   // HI-HAT — разные звуки в зависимости от педали и ноты
- // HI-HAT — разные звуки в зависимости от педали и ноты
-if (padId === 'hihat') {
-  // Явная педаль (нота 44) — всегда chick
-  if (note === 44) {
-    if (RR_COUNTS.hihat_pedal > 0) {
-      return rr('/samples/hihat_pedal', 'hihat_pedal', RR_COUNTS.hihat_pedal)
+  if (padId === 'hihat') {
+    // Явная педаль (нота 44) — всегда chick
+    if (note === 44) {
+      if (RR_COUNTS.hihat_pedal > 0) return rr('/samples/hihat_pedal', 'hihat_pedal', RR_COUNTS.hihat_pedal)
+      return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
     }
-    return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
-  }
 
-  // КЛИК МЫШЬЮ (note == null):
-  //  - педаль ВНИЗ → closed
-  //  - педаль ВВЕРХ → open  (чтобы на слух был явный контраст)
-  if (note == null) {
+    // Если педаль зажата — любой удар считается tight closed
     if (isPedalDown.value) {
       return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
     }
-    return rr('/samples/hihat_open', 'hihat_open', RR_COUNTS.hihat_open)
-  }
 
-  // Если педаль зажата — любой удар (42/46) считаем tight closed
-  if (isPedalDown.value) {
+    // Без педали: 46=open, 42=closed, клики мышью/прочее — closed
+    if (note === 46) {
+      return rr('/samples/hihat_open', 'hihat_open', RR_COUNTS.hihat_open)
+    }
+    // 42 или всё остальное — closed
     return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
   }
-
-  // Без педали: 46=open, 42=closed
-  if (note === 46) return rr('/samples/hihat_open', 'hihat_open', RR_COUNTS.hihat_open)
-  return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
-}
-
 
   // CRASH
   if (padId === 'crash1' || padId === 'crash2') {
