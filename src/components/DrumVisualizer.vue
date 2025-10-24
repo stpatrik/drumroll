@@ -18,8 +18,14 @@
       </select>
 
       <span v-if="connectionError" class="midi-error">{{ connectionError }}</span>
+
+      <!-- Индикатор педали -->
+      <span class="pedal-indicator" :class="{down:isPedalDown}">
+        🦶 Pedal: <strong>{{ isPedalDown ? 'DOWN (Space)' : 'up (Space)' }}</strong>
+      </span>
     </div>
 
+    <!-- Отладка MIDI -->
     <div class="debug" v-if="isMidiMonitorEnabled && debug.count">
       MIDI events: {{ debug.count }} · {{ debug.last }}
     </div>
@@ -37,7 +43,7 @@
           :class="{ active: isActive(pad.id) }"
           :style="padStyle(pad.id)"
           v-html="getPadSvg(pad)"
-        ></div>
+        />
         <div class="label">{{ pad.label }}</div>
       </div>
     </div>
@@ -47,7 +53,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import DrumRoll from './DrumRoll.vue'
 
 /* ======================= SVG для пэдов ======================= */
@@ -75,7 +81,7 @@ function getPadSvg(pad) {
   return fallbackSvg
 }
 
-/* ======================= Round-robin helper ======================= */
+/* ======================= Round-Robin helper ======================= */
 const rrIndex = new Map()
 function rr(prefix, key, total) {
   const i = (rrIndex.get(key) ?? 0) % total
@@ -83,46 +89,103 @@ function rr(prefix, key, total) {
   return `${prefix}/v${i + 1}.wav`
 }
 
-/* Кол-во семплов в папках /public/samples/... */
+/* === Количество файлов в /public/samples === */
 const RR_COUNTS = {
   kick: 6,
   hihat_closed: 6,
   hihat_open: 3,
+  hihat_pedal: 3,   // если папки нет — будет fallback на closed
   crash: 7,
   tom: 3,
   rimshot: 6,
   snare_center: 6,
   snare_off: 6,
-  stick: 6,
+  stick: 6
 }
 
-/* Возвращаем путь к семплу по пэду и (если есть) ноте */
+/* ======================= «Педаль на пробел» ======================= */
+const isPedalDown = ref(false)
+
+function onKeyDown(e) {
+  if (e.code === 'Space') {
+    e.preventDefault()
+    if (!isPedalDown.value) {
+      isPedalDown.value = true
+      // моментальный chick (как нота 44)
+      const pad = pads.value.find(p => p.id === 'hihat')
+      if (pad) hit(pad, 0.85, 44)
+    }
+  }
+}
+function onKeyUp(e) {
+  if (e.code === 'Space') {
+    e.preventDefault()
+    isPedalDown.value = false
+  }
+}
+onMounted(() => {
+  window.addEventListener('keydown', onKeyDown, { passive: false })
+  window.addEventListener('keyup', onKeyUp, { passive: false })
+})
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keyup', onKeyUp)
+})
+
+/* ======================= Выбор сэмпла ======================= */
 function sampleFor(padId, note) {
-  // Kick
+  // KICK
   if (padId === 'kick') return rr('/samples/kick', 'kick', RR_COUNTS.kick)
 
-  // Snare
+  // SNARE
   if (padId === 'snare') return rr('/samples/snare_center', 'snare_center', RR_COUNTS.snare_center)
 
-  // Toms
+  // TOMS
   if (padId === 'tom1' || padId === 'tom2' || padId === 'tom3') {
-    return rr('/samples/tom', padId, RR_COUNTS.tom) // независимый rr по каждому тому
+    return rr('/samples/tom', padId, RR_COUNTS.tom)
   }
 
-  // Hi-hat (42=closed, 46=open, 44=pedal -> closed если нет педального)
-  if (padId === 'hihat') {
-    if (note === 46) return rr('/samples/hihat_open', 'hihat_open', RR_COUNTS.hihat_open)
+  // HI-HAT — разные звуки в зависимости от педали и ноты
+ // HI-HAT — разные звуки в зависимости от педали и ноты
+if (padId === 'hihat') {
+  // Явная педаль (нота 44) — всегда chick
+  if (note === 44) {
+    if (RR_COUNTS.hihat_pedal > 0) {
+      return rr('/samples/hihat_pedal', 'hihat_pedal', RR_COUNTS.hihat_pedal)
+    }
     return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
   }
 
-  // Crashes
+  // КЛИК МЫШЬЮ (note == null):
+  //  - педаль ВНИЗ → closed
+  //  - педаль ВВЕРХ → open  (чтобы на слух был явный контраст)
+  if (note == null) {
+    if (isPedalDown.value) {
+      return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
+    }
+    return rr('/samples/hihat_open', 'hihat_open', RR_COUNTS.hihat_open)
+  }
+
+  // Если педаль зажата — любой удар (42/46) считаем tight closed
+  if (isPedalDown.value) {
+    return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
+  }
+
+  // Без педали: 46=open, 42=closed
+  if (note === 46) return rr('/samples/hihat_open', 'hihat_open', RR_COUNTS.hihat_open)
+  return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
+}
+
+
+  // CRASH
   if (padId === 'crash1' || padId === 'crash2') {
     return rr('/samples/crash', 'crash', RR_COUNTS.crash)
   }
 
-  // Ride (заглушка)
+  // RIDE — временная заглушка
   if (padId === 'ride') return rr('/samples/stick', 'stick', RR_COUNTS.stick)
 
+  // Fallback
   return rr('/samples/stick', 'stick', RR_COUNTS.stick)
 }
 
@@ -135,7 +198,7 @@ const pads = ref([
   { id: 'tom3',   label: 'Флор-том', file: 'том3.svg' },
   { id: 'hihat',  label: 'Хай-хэт',  file: 'хайхет.svg' },
   { id: 'crash1', label: 'Crash L',  file: 'тарелка1.svg' },
-  { id: 'crash2', label: 'Crash R',  file: 'тарелка2.svg' },
+  { id: 'crash2', label: 'Crash R',  file: 'тарелка2.svg' }
 ])
 
 /* ======================= SVG raw (Vite 5) ======================= */
@@ -145,12 +208,11 @@ const fallbackSvg =
 
 function normalizeSvg(content) {
   return content
-    .replace(/^\uFEFF/, '')                // BOM
-    .replace(/<\?xml[\s\S]*?\?>/i, '')     // XML пролог
-    .replace(/<!DOCTYPE[\s\S]*?>/i, '')    // DOCTYPE
-    .replace(/^\s+/, '')                   // лидирующие пробелы
+    .replace(/^\uFEFF/, '')
+    .replace(/<\?xml[\s\S]*?\?>/i, '')
+    .replace(/<!DOCTYPE[\s\S]*?>/i, '')
+    .replace(/^\s+/, '')
     .replace(/<svg\b([^>]*?)>/i, (m, attrs) => {
-      // гарантируем xmlns
       if (!/xmlns=/.test(m)) return `<svg ${attrs} xmlns="http://www.w3.org/2000/svg">`
       return m
     })
@@ -164,18 +226,17 @@ function normalizeSvg(content) {
     .replace(/stroke="[^"]*"/gi, 'stroke="currentColor"')
 }
 
-// 1) Глобом грузим svg
 const svgModules = import.meta.glob('../svg/*.svg', { query: '?raw', import: 'default', eager: true })
 for (const [path, raw] of Object.entries(svgModules)) {
   const file = path.split('/').pop()
   const txt = (typeof raw === 'string' ? raw : raw?.default) || ''
   svgs.value[file] = normalizeSvg(txt)
 }
+console.log('[SVG files]', Object.keys(svgs.value))
 
 /* ======================= Подсветка (velocity) ======================= */
 const ACTIVE_MS = 1000
 const activeMap = ref(new Map()) // id -> vel(0..1)
-
 function isActive(id) { return activeMap.value.has(id) }
 function padStyle(id) { return { '--hit': activeMap.value.get(id) ?? 0 } }
 function flash(id, vel = 1) {
@@ -347,7 +408,8 @@ function playNoteMidi(status, number, velocity) {
     const pad = pads.value.find(p => p.id === padId)
     if (!pad) return
     const v = Math.max(0.1, Math.min(1, velocity / 127))
-    hit(pad, v, number)        // пробрасываем note (для HH open 46)
+    // Прокидываем note: для хэта это 42/46/44
+    hit(pad, v, number)
     return
   }
   if (checkStatusByte(status, BASE_MIDI_STATUS_BYTES.NOTE_OFF)) return
@@ -363,7 +425,11 @@ function playNoteMidi(status, number, velocity) {
   display:flex; gap:10px; align-items:center;
   background:#fff; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,.08);
   padding:8px 12px;
+  flex-wrap:wrap;
 }
+.pedal-indicator{ margin-left:6px; font-size:12px; color:#555; }
+.pedal-indicator.down{ color:#d11; }
+
 .btn{
   background:linear-gradient(180deg,#fefefe,#e8e8e8);
   border:1px solid #ccc; border-radius:8px; padding:6px 12px;
@@ -388,13 +454,15 @@ function playNoteMidi(status, number, velocity) {
 .pad:hover{ transform:scale(1.05); }
 .label{ font-size:12px; margin-top:4px; color:#333; }
 
-.svg-wrap{
+/* Визуальная реакция */
+.svg-wrap {
   --hit: 0;
-  color:#222;
-  width:88px; height:88px;
+  color: #222;
+  width: 88px;
+  height: 88px;
   transition: color .15s ease, transform .15s ease, filter .15s ease;
 }
-.svg-wrap.active{
+.svg-wrap.active {
   color: hsl(0 70% calc(38% + var(--hit) * 8%));
   transform: scale(calc(1 + var(--hit) * 0.04));
   filter: drop-shadow(0 0 calc(var(--hit) * 2.5px) rgba(255, 50, 50, 0.25));
