@@ -82,11 +82,16 @@ function getPadSvg(pad) {
 }
 
 /* ======================= Round-Robin helper ======================= */
+// рядом с rr()
+const asset = (p) => {
+  const clean = String(p).replace(/^\/+/, '');
+  return `${import.meta.env.BASE_URL}${clean}`;
+};
 const rrIndex = new Map()
 function rr(prefix, key, total) {
-  const i = (rrIndex.get(key) ?? 0) % total
-  rrIndex.set(key, i + 1)
-  return `${prefix}/v${i + 1}.wav`
+  const i = (rrIndex.get(key) ?? 0) % total;
+  rrIndex.set(key, i + 1);
+  return asset(`${prefix}/v${i + 1}.wav`);
 }
 
 /* === Количество файлов в /public/samples === */
@@ -106,17 +111,18 @@ const RR_COUNTS = {
 /* ======================= «Педаль на пробел» ======================= */
 const isPedalDown = ref(false)
 
-function onKeyDown(e) {
+async function onKeyDown(e) {
   if (e.code === 'Space') {
     e.preventDefault()
+    await ensureAudio()                // теперь можно await
     if (!isPedalDown.value) {
       isPedalDown.value = true
-      // моментальный chick (как нота 44)
       const pad = pads.value.find(p => p.id === 'hihat')
-      if (pad) hit(pad, 0.85, 44)
+      if (pad) await hit(pad, 0.85, 44) // можно тоже подождать
     }
   }
 }
+
 function onKeyUp(e) {
   if (e.code === 'Space') {
     e.preventDefault()
@@ -124,8 +130,18 @@ function onKeyUp(e) {
   }
 }
 onMounted(() => {
+  // клавиатура для педали
   window.addEventListener('keydown', onKeyDown, { passive: false })
   window.addEventListener('keyup', onKeyUp, { passive: false })
+
+  // разблокировать AudioContext первым пользовательским жестом
+  const unlock = async () => {
+    await ensureAudio()
+    window.removeEventListener('pointerdown', unlock)
+    window.removeEventListener('keydown', unlock)
+  }
+  window.addEventListener('pointerdown', unlock, { passive: true })
+  window.addEventListener('keydown', unlock, { passive: true })
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeyDown)
@@ -135,47 +151,53 @@ onUnmounted(() => {
 /* ======================= Выбор сэмпла ======================= */
 function sampleFor(padId, note) {
   // KICK
-  if (padId === 'kick') return rr('/samples/kick', 'kick', RR_COUNTS.kick)
+  if (padId === 'kick') return rr('samples/kick', 'kick', RR_COUNTS.kick)
 
   // SNARE
-  if (padId === 'snare') return rr('/samples/snare_center', 'snare_center', RR_COUNTS.snare_center)
+  if (padId === 'snare') return rr('samples/snare_center', 'snare_center', RR_COUNTS.snare_center)
 
   // TOMS
   if (padId === 'tom1' || padId === 'tom2' || padId === 'tom3') {
-    return rr('/samples/tom', padId, RR_COUNTS.tom)
+    return rr('samples/tom', padId, RR_COUNTS.tom)
   }
 
   // HI-HAT — разные звуки в зависимости от педали и ноты
   if (padId === 'hihat') {
-    // Явная педаль (нота 44) — всегда chick
+    // 1) явная педаль (нота 44) — "chick"
     if (note === 44) {
-      if (RR_COUNTS.hihat_pedal > 0) return rr('/samples/hihat_pedal', 'hihat_pedal', RR_COUNTS.hihat_pedal)
-      return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
+      if (RR_COUNTS.hihat_pedal > 0) {
+        return rr('samples/hihat_pedal', 'hihat_pedal', RR_COUNTS.hihat_pedal)
+      }
+      return rr('samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
     }
 
-    // Если педаль зажата — любой удар считается tight closed
+    // 2) если педаль зажата (Space) — считаем tight closed для любого удара
     if (isPedalDown.value) {
-      return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
+      return rr('samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
     }
 
-    // Без педали: 46=open, 42=closed, клики мышью/прочее — closed
-    if (note === 46) {
-      return rr('/samples/hihat_open', 'hihat_open', RR_COUNTS.hihat_open)
+    // 3) явные ноты: 42=closed, 46=open
+    if (note === 42) {
+      return rr('samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
     }
-    // 42 или всё остальное — closed
-    return rr('/samples/hihat_closed', 'hihat_closed', RR_COUNTS.hihat_closed)
+    if (note === 46) {
+      return rr('samples/hihat_open', 'hihat_open', RR_COUNTS.hihat_open)
+    }
+
+    // 4) иначе (мышь / другие ноты) — по умолчанию ОТКРЫТЫЙ
+    return rr('samples/hihat_open', 'hihat_open', RR_COUNTS.hihat_open)
   }
 
   // CRASH
   if (padId === 'crash1' || padId === 'crash2') {
-    return rr('/samples/crash', 'crash', RR_COUNTS.crash)
+    return rr('samples/crash', 'crash', RR_COUNTS.crash)
   }
 
   // RIDE — временная заглушка
-  if (padId === 'ride') return rr('/samples/stick', 'stick', RR_COUNTS.stick)
+  if (padId === 'ride') return rr('samples/stick', 'stick', RR_COUNTS.stick)
 
   // Fallback
-  return rr('/samples/stick', 'stick', RR_COUNTS.stick)
+  return rr('samples/stick', 'stick', RR_COUNTS.stick)
 }
 
 /* ======================= Пэды ======================= */
@@ -237,6 +259,19 @@ function flash(id, vel = 1) {
     activeMap.value = new Map(activeMap.value)
   }, ACTIVE_MS)
 }
+// Ensure AudioContext is created & running from a user gesture
+async function ensureAudio() {
+  try {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' })
+    }
+    if (ctx && ctx.state !== 'running') {
+      await ctx.resume()
+    }
+  } catch (e) {
+    console.warn('[audio] ensureAudio failed', e)
+  }
+}
 
 /* ======================= Аудио ======================= */
 let ctx
@@ -250,9 +285,16 @@ async function playSample(url, vel = 1) {
   const c = await getCtx()
   let buf = cache.get(url)
   if (!buf) {
-    const res = await fetch(url)
-    buf = await c.decodeAudioData(await res.arrayBuffer())
-    cache.set(url, buf)
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const ab = await res.arrayBuffer();
+      buf = await c.decodeAudioData(ab);
+      cache.set(url, buf);
+    } catch (err) {
+      console.error('[audio] failed to load', url, err);
+      return; // don't try to play if loading failed
+    }
   }
   const src = c.createBufferSource()
   const gain = c.createGain()
@@ -262,6 +304,7 @@ async function playSample(url, vel = 1) {
   src.start()
 }
 async function hit(pad, vel = 1, note = null) {
+  await ensureAudio()
   flash(pad.id, vel)
   const url = sampleFor(pad.id, note)
   if (url) await playSample(url, vel)
@@ -349,6 +392,7 @@ async function connectMidiDevice() {
   }
   try {
     midiConnectionState.value = MidiConnectionState.CONNECTING
+    await ensureAudio()
     const access = await navigator.requestMIDIAccess({ software: true })
     if (access.inputs.size === 0) {
       connectionError.value = 'MIDI-устройство не найдено'
